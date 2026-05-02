@@ -1,0 +1,18 @@
+{
+  "name": "cd-engineering-system",
+  "version": "3.0.0",
+  "description": "CD Engineering — Air Conditioning Business Management System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "puppeteer": "^24.42.0",
+    "sql.js": "^1.11.0",
+    "uuid": "^10.0.0"
+  }
+}
