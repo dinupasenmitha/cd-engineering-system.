@@ -223,7 +223,7 @@ APP.Router = (function () {
   const pages = {
     dashboard: APP.Dashboard, customers: APP.Customers, jobs: APP.Jobs,
     pricing: APP.Pricing, invoices: APP.Invoices, technicians: APP.Technicians, settings: APP.Settings,
-    fleet: APP.Fleet, catalog: APP.Catalog,
+    fleet: APP.Fleet, catalog: APP.Catalog, documents: APP.Documents,
   };
 
   function navigate(page, action, id) {

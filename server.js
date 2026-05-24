@@ -1,45 +1,77 @@
+require('dotenv').config();
 /* =========================================================
    CD Engineering — Express Server (v3.0)
    ========================================================= */
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
-const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const db = require('./server/db');
 const { requireAuth, requireAdmin } = require('./server/auth');
 const backup = require('./server/backup');
+const multer = require('multer');
 
 const app = express();
+app.use(helmet({ contentSecurityPolicy: false }));
 const PORT = process.env.PORT || 3000;
 const SESSION_MAX_AGE = 20 * 60 * 1000; // 20 minutes
+
+// ── Multer Config (File Upload) ───────────────────────────
+const UPLOAD_DIR = path.join(__dirname, 'data', 'uploads');
+if (!require('fs').existsSync(UPLOAD_DIR)) require('fs').mkdirSync(UPLOAD_DIR, { recursive: true });
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname)),
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|webp|pdf|heic/;
+    const ext = allowed.test(path.extname(file.originalname).toLowerCase());
+    const mime = allowed.test(file.mimetype);
+    cb(null, ext && mime);
+  }
+});
 
 // ── Middleware ─────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
-  secret: crypto.randomBytes(32).toString('hex'),
+  secret: process.env.SESSION_SECRET || 'fallback-secret-change-me',
   resave: false,
   saveUninitialized: false,
   cookie: {
     maxAge: SESSION_MAX_AGE,
     httpOnly: true,
     sameSite: 'strict',
+    secure: process.env.NODE_ENV === 'production',
   },
   rolling: true, // Reset maxAge on every response
 }));
 
 // Serve static frontend files
-app.use(express.static(path.join(__dirname), {
+app.use(express.static(path.join(__dirname, 'public'), {
   index: false, // We handle index route ourselves
   extensions: ['html'],
 }));
 
+// ── Brute Force Protection ────────────────────────────────
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: { error: 'Too many login attempts. Please wait 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── Auth Routes ───────────────────────────────────────────
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
 
@@ -236,9 +268,10 @@ app.post('/api/jobs', (req, res) => {
   const b = req.body;
   if (!b.customerId || !b.date) return res.status(400).json({ error: 'Customer and date required' });
   const id = uuidv4();
-  db.run(`INSERT INTO jobs (id, customer_id, service_id, lorry_id, service_type, description, technician_id, status, date,
-    parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [id, b.customerId, b.serviceId || '', b.lorryId || '', b.serviceType || 'Repair', b.description || '', b.technicianId || '', b.status || 'Pending',
+  const jobNumber = db.nextJobNumber();
+  db.run(`INSERT INTO jobs (id, job_number, customer_id, service_id, lorry_id, service_type, description, technician_id, status, date,
+    parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, jobNumber, b.customerId, b.serviceId || '', b.lorryId || '', b.serviceType || 'Repair', b.description || '', b.technicianId || '', b.status || 'Pending',
      b.date, b.partsCost||0, b.laborCost||0, b.transportCost||0, b.overheadPercent||10, b.profitPercent||30]);
   res.json(mapJob(db.get('SELECT * FROM jobs WHERE id = ?', [id])));
 });
@@ -247,12 +280,20 @@ app.put('/api/jobs/:id', (req, res) => {
   const existing = db.get('SELECT * FROM jobs WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Job not found' });
   const b = req.body;
+  const newStatus = b.status || existing.status;
+  
   db.run(`UPDATE jobs SET customer_id=?, service_id=?, lorry_id=?, service_type=?, description=?, technician_id=?, status=?, date=?,
     parts_cost=?, labor_cost=?, transport_cost=?, overhead_percent=?, profit_percent=?, updated_at=datetime("now") WHERE id=?`,
     [b.customerId||existing.customer_id, b.serviceId??existing.service_id, b.lorryId??existing.lorry_id, b.serviceType||existing.service_type, b.description??existing.description,
-     b.technicianId??existing.technician_id, b.status||existing.status, b.date||existing.date,
+     b.technicianId??existing.technician_id, newStatus, b.date||existing.date,
      b.partsCost??existing.parts_cost, b.laborCost??existing.labor_cost, b.transportCost??existing.transport_cost,
      b.overheadPercent??existing.overhead_percent, b.profitPercent??existing.profit_percent, req.params.id]);
+
+  if (newStatus !== existing.status) {
+    db.run('INSERT INTO job_history (id, job_id, status, notes, updated_by) VALUES (?,?,?,?,?)',
+      [uuidv4(), req.params.id, newStatus, 'Status updated', req.session?.user?.username || 'system']);
+  }
+     
   res.json(mapJob(db.get('SELECT * FROM jobs WHERE id = ?', [req.params.id])));
 });
 
@@ -260,6 +301,42 @@ app.delete('/api/jobs/:id', requireAdmin, (req, res) => {
   db.run('DELETE FROM invoices WHERE job_id = ?', [req.params.id]);
   db.run('DELETE FROM jobs WHERE id = ?', [req.params.id]);
   res.json({ success: true });
+});
+
+app.get('/api/jobs/:id/parts', (req, res) => {
+  res.json(db.all('SELECT jp.*, p.name FROM job_parts jp JOIN parts p ON jp.part_id = p.id WHERE jp.job_id = ?', [req.params.id]));
+});
+
+app.post('/api/jobs/:id/parts', (req, res) => {
+  const { partId, quantity } = req.body;
+  const qty = parseInt(quantity, 10) || 1;
+  const part = db.get('SELECT * FROM parts WHERE id = ?', [partId]);
+  if (!part) return res.status(404).json({ error: 'Part not found' });
+  if (part.stock < qty) return res.status(400).json({ error: 'Not enough stock' });
+  
+  const id = uuidv4();
+  db.run('INSERT INTO job_parts (id, job_id, part_id, quantity, unit_price) VALUES (?,?,?,?,?)', [id, req.params.id, partId, qty, part.unit_price]);
+  db.run('UPDATE parts SET stock = stock - ? WHERE id = ?', [qty, partId]);
+  
+  db.run('UPDATE jobs SET parts_cost = parts_cost + ? WHERE id = ?', [qty * part.unit_price, req.params.id]);
+  
+  res.json({ success: true, part: db.get('SELECT * FROM job_parts WHERE id = ?', [id]) });
+});
+
+app.delete('/api/jobs/:id/parts/:jobPartId', (req, res) => {
+  const jp = db.get('SELECT * FROM job_parts WHERE id = ? AND job_id = ?', [req.params.jobPartId, req.params.id]);
+  if (!jp) return res.status(404).json({ error: 'Job part not found' });
+  
+  db.run('DELETE FROM job_parts WHERE id = ?', [req.params.jobPartId]);
+  db.run('UPDATE parts SET stock = stock + ? WHERE id = ?', [jp.quantity, jp.part_id]);
+  
+  db.run('UPDATE jobs SET parts_cost = parts_cost - ? WHERE id = ?', [jp.quantity * jp.unit_price, req.params.id]);
+  
+  res.json({ success: true });
+});
+
+app.get('/api/jobs/:id/history', (req, res) => {
+  res.json(db.all('SELECT * FROM job_history WHERE job_id = ? ORDER BY created_at DESC', [req.params.id]));
 });
 
 // ── Invoices ──────────────────────────────────────────────
@@ -397,7 +474,7 @@ app.post('/api/backup/restore', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.get('/api/backup/export', (req, res) => {
+app.get('/api/backup/export', requireAdmin, (req, res) => {
   const data = db.exportAllData();
   res.setHeader('Content-Disposition', `attachment; filename=cd_engineering_backup_${new Date().toISOString().split('T')[0]}.json`);
   res.json(data);
@@ -443,15 +520,56 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
+// ── Signed Documents ─────────────────────────────────────
+app.post('/api/documents/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const { jobId, customerId, documentType, notes } = req.body;
+  if (!jobId || !customerId) return res.status(400).json({ error: 'Job and customer required' });
+  const id = uuidv4();
+  db.run(`INSERT INTO signed_documents (id, job_id, customer_id, document_type, filename, original_name, mime_type, file_size, uploaded_by, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [id, jobId, customerId, documentType || 'job_sheet', req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.session?.user?.username || '', notes || '']);
+  res.json(db.get('SELECT * FROM signed_documents WHERE id = ?', [id]));
+});
+
+app.get('/api/documents', (req, res) => {
+  const { jobId, customerId } = req.query;
+  if (jobId) {
+    res.json(db.all('SELECT * FROM signed_documents WHERE job_id = ? ORDER BY created_at DESC', [jobId]));
+  } else if (customerId) {
+    res.json(db.all('SELECT * FROM signed_documents WHERE customer_id = ? ORDER BY created_at DESC', [customerId]));
+  } else {
+    res.json(db.all('SELECT * FROM signed_documents ORDER BY created_at DESC'));
+  }
+});
+
+app.get('/api/documents/:id/file', (req, res) => {
+  const doc = db.get('SELECT * FROM signed_documents WHERE id = ?', [req.params.id]);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  const filePath = path.join(UPLOAD_DIR, doc.filename);
+  if (!require('fs').existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+  res.setHeader('Content-Type', doc.mime_type);
+  res.setHeader('Content-Disposition', `inline; filename="${doc.original_name}"`);
+  res.sendFile(filePath);
+});
+
+app.delete('/api/documents/:id', requireAdmin, (req, res) => {
+  const doc = db.get('SELECT * FROM signed_documents WHERE id = ?', [req.params.id]);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  const filePath = path.join(UPLOAD_DIR, doc.filename);
+  try { require('fs').unlinkSync(filePath); } catch(e) {}
+  db.run('DELETE FROM signed_documents WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
 // ── Serve index.html for all non-API routes ───────────────
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ── Row Mapping Helpers (snake_case → camelCase) ──────────
 function mapJob(j) {
   if (!j) return null;
-  return { id: j.id, customerId: j.customer_id, serviceId: j.service_id, lorryId: j.lorry_id, serviceType: j.service_type, description: j.description,
+  return { id: j.id, jobNumber: j.job_number, customerId: j.customer_id, serviceId: j.service_id, lorryId: j.lorry_id, serviceType: j.service_type, description: j.description,
     technicianId: j.technician_id, status: j.status, date: j.date, partsCost: j.parts_cost, laborCost: j.labor_cost,
     transportCost: j.transport_cost, overheadPercent: j.overhead_percent, profitPercent: j.profit_percent,
     createdAt: j.created_at, updatedAt: j.updated_at };

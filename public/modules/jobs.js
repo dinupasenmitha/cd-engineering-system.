@@ -347,6 +347,7 @@ APP.Jobs = (function () {
     const profitPercent = parseFloat(document.getElementById('jobProfit').value) || 30;
 
     if (!customerId || !date || !serviceId) { APP.toast('Please select a customer, service, and date', 'error'); return; }
+    if (partsCost < 0 || laborCost < 0 || transportCost < 0 || overheadPercent < 0 || profitPercent < 0) { APP.toast('Costs and percentages cannot be negative', 'error'); return; }
 
     const jobData = { customerId, serviceId, lorryId, serviceType, description, technicianId, status, date, partsCost, laborCost, transportCost, overheadPercent, profitPercent };
     if (editId) { S().updateJob(editId, jobData); APP.toast('Job updated'); }
