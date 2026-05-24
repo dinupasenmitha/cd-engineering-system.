@@ -588,14 +588,19 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   background: radial-gradient(circle at top left, var(--primary-800), var(--primary-900));
 }
 .login-card {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: #ffffff;
+  border: 1px solid var(--gray-200);
   border-radius: var(--radius); padding: 42px 36px; width: 90%; max-width: 400px;
-  box-shadow: 0 30px 60px -15px rgba(15, 23, 42, 0.3); animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25); animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .login-logo { text-align: center; margin-bottom: 28px; }
+.login-card .sidebar-logo {
+  background: var(--primary-600);
+  color: #ffffff;
+  border: none;
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
 .login-logo h1 { font-size: 24px; font-weight: 800; color: var(--gray-900); margin-bottom: 4px; letter-spacing: -0.5px; }
 .login-logo p { font-size: 13.5px; color: var(--gray-500); }
 .login-error {
@@ -604,7 +609,7 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 .login-submit { width: 100%; justify-content: center; padding: 12px; font-size: 15px; margin-top: 8px; }
-.login-footer { text-align: center; margin-top: 24px; font-size: 11px; color: var(--gray-400); }
+.login-footer { text-align: center; margin-top: 24px; font-size: 11px; color: var(--gray-500); }
 
 /* ── Sidebar User Info ─────────────────────────────────── */
 .sidebar-user {
@@ -627,9 +632,9 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 
 /* ── Dark Mode Login ───────────────────────────────────── */
 [data-theme="dark"] .login-card {
-  background: rgba(22, 27, 34, 0.8);
-  border-color: rgba(48, 54, 61, 0.5);
-  box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.6);
+  background: #161b22;
+  border-color: #30363d;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }
 [data-theme="dark"] .login-logo h1 { color: #f0f6fc; }
 
