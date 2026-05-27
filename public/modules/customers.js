@@ -167,21 +167,31 @@ APP.Customers = (function () {
 
   function closeModal() { const m = document.getElementById('customerModal'); if (m) m.remove(); }
 
-  function saveCustomer(editId) {
+  async function saveCustomer(editId) {
     const name = document.getElementById('custName').value.trim();
     const phone = document.getElementById('custPhone').value.trim();
     const address = document.getElementById('custAddress').value.trim();
     const notes = document.getElementById('custNotes').value.trim();
     if (!name || !phone) { APP.toast('Please fill in name and phone', 'error'); return; }
-    if (editId) { S().updateCustomer(editId, { name, phone, address, notes }); APP.toast('Customer updated'); }
-    else { S().addCustomer({ name, phone, address, notes }); APP.toast('Customer added'); }
-    closeModal();
-    // Re-render current view
-    const hash = window.location.hash;
-    if (hash.includes('detail')) {
-      const id = hash.split('/')[2];
-      if (id) renderDetail(id); else renderList();
-    } else { renderList(); }
+    
+    let success = false;
+    if (editId) {
+      const r = await S().updateCustomer(editId, { name, phone, address, notes });
+      if (r) { APP.toast('Customer updated'); success = true; }
+    } else {
+      const r = await S().addCustomer({ name, phone, address, notes });
+      if (r) { APP.toast('Customer added'); success = true; }
+    }
+
+    if (success) {
+      closeModal();
+      // Re-render current view
+      const hash = window.location.hash;
+      if (hash.includes('detail')) {
+        const id = hash.split('/')[2];
+        if (id) renderDetail(id); else renderList();
+      } else { renderList(); }
+    }
   }
 
   function confirmDelete(id) {
@@ -196,8 +206,8 @@ APP.Customers = (function () {
       message: msg,
       type: linked.jobCount > 0 ? 'danger' : 'warn',
       confirmText: 'Delete',
-      onConfirm: () => {
-        S().deleteCustomer(id);
+      onConfirm: async () => {
+        await S().deleteCustomer(id);
         APP.toast('Customer deleted');
         renderList();
       }

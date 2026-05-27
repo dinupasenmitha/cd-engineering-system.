@@ -39,6 +39,9 @@ function listBackups() {
 
 // ── Restore Backup ────────────────────────────────────────
 function restoreBackup(filename) {
+  if (!filename || filename !== path.basename(filename) || !filename.endsWith('.json')) {
+    throw new Error('Invalid backup filename');
+  }
   const filepath = path.join(BACKUP_DIR, filename);
   if (!fs.existsSync(filepath)) throw new Error('Backup file not found');
   const raw = fs.readFileSync(filepath, 'utf-8');

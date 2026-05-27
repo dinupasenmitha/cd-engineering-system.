@@ -219,15 +219,17 @@ APP.Jobs = (function () {
     }
   }
 
-  function advanceStatus(id) {
+  async function advanceStatus(id) {
     const j = S().getJob(id);
     if (!j) return;
     const next = j.status === 'Pending' ? 'In Progress' : 'Completed';
-    S().updateJob(id, { status: next });
-    APP.toast(`Job status updated to "${next}"`);
-    const hash = window.location.hash;
-    if (hash.includes('detail')) renderDetail(id);
-    else renderList();
+    const updated = await S().updateJob(id, { status: next });
+    if (updated) {
+      APP.toast(`Job status updated to "${next}"`);
+      const hash = window.location.hash;
+      if (hash.includes('detail')) renderDetail(id);
+      else renderList();
+    }
   }
 
   function confirmDelete(id) {
@@ -243,10 +245,10 @@ APP.Jobs = (function () {
       message: msg,
       type: 'danger',
       confirmText: 'Delete',
-      onConfirm: () => {
+      onConfirm: async () => {
         // Also delete linked invoice if exists
-        if (inv) S().updateInvoice(inv.id, { jobId: null });
-        S().deleteJob(id);
+        if (inv) await S().updateInvoice(inv.id, { jobId: null });
+        await S().deleteJob(id);
         APP.toast('Job deleted');
         APP.Router.navigate('jobs');
       }
@@ -328,7 +330,7 @@ APP.Jobs = (function () {
     }
   }
 
-  function saveJob(editId) {
+  async function saveJob(editId) {
     const customerId = document.getElementById('jobCustomer').value;
     
     const serviceSelect = document.getElementById('jobServiceId');
@@ -347,12 +349,21 @@ APP.Jobs = (function () {
     const profitPercent = parseFloat(document.getElementById('jobProfit').value) || 30;
 
     if (!customerId || !date || !serviceId) { APP.toast('Please select a customer, service, and date', 'error'); return; }
+    if (partsCost < 0 || laborCost < 0 || transportCost < 0 || overheadPercent < 0 || profitPercent < 0) { APP.toast('Costs and percentages cannot be negative', 'error'); return; }
 
     const jobData = { customerId, serviceId, lorryId, serviceType, description, technicianId, status, date, partsCost, laborCost, transportCost, overheadPercent, profitPercent };
-    if (editId) { S().updateJob(editId, jobData); APP.toast('Job updated'); }
-    else { S().addJob(jobData); APP.toast('Job created'); }
-    closeModal();
-    renderList();
+    let success = false;
+    if (editId) {
+      const r = await S().updateJob(editId, jobData);
+      if (r) { APP.toast('Job updated'); success = true; }
+    } else {
+      const r = await S().addJob(jobData);
+      if (r) { APP.toast('Job created'); success = true; }
+    }
+    if (success) {
+      closeModal();
+      renderList();
+    }
   }
 
   return { render, filter, search, showModal, showModalForCustomer, closeModal, saveJob, advanceStatus, confirmDelete, onServiceChange };

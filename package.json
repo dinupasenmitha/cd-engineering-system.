@@ -10,13 +10,15 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.9.0",
+    "chart.js": "^4.4.4",
     "dotenv": "^17.4.2",
-    "express": "^4.21.0",
+    "express": "^4.22.2",
     "express-rate-limit": "^8.5.2",
     "express-session": "^1.18.0",
     "helmet": "^8.2.0",
+    "html2pdf.js": "^0.14.0",
     "multer": "^2.1.1",
     "sql.js": "^1.11.0",
-    "uuid": "^10.0.0"
+    "uuid": "^11.1.1"
   }
 }

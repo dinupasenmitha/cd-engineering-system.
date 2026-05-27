@@ -156,6 +156,10 @@ APP.Settings = (function () {
   async function exportData() {
     try {
       const resp = await fetch('/api/backup/export');
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: 'Export failed' }));
+        throw new Error(err.error || 'Export failed');
+      }
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -164,7 +168,7 @@ APP.Settings = (function () {
       a.click();
       URL.revokeObjectURL(url);
       APP.toast('Data exported successfully');
-    } catch (e) { APP.toast('Export failed', 'error'); }
+    } catch (e) { APP.toast(e.message || 'Export failed', 'error'); }
   }
 
   function importData(event) {
@@ -197,10 +201,14 @@ APP.Settings = (function () {
       onConfirm: async () => {
         try {
           // Delete all and re-seed
-          await fetch('/api/backup/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          const resp = await fetch('/api/backup/reset-demo', { method: 'POST' });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ error: 'Reset failed' }));
+            throw new Error(err.error || 'Reset failed');
+          }
           APP.toast('Resetting... Please wait');
           setTimeout(() => location.reload(), 1500);
-        } catch (e) { APP.toast('Reset failed', 'error'); }
+        } catch (e) { APP.toast(e.message || 'Reset failed', 'error'); }
       }
     });
   }

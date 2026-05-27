@@ -170,7 +170,7 @@ APP.Technicians = (function () {
 
   function closeModal() { const m = document.getElementById('techModal'); if (m) m.remove(); }
 
-  function saveTechnician(editId) {
+  async function saveTechnician(editId) {
     const name = document.getElementById('techName').value.trim();
     const phone = document.getElementById('techPhone').value.trim();
     const specialization = document.getElementById('techSpec').value;
@@ -178,10 +178,20 @@ APP.Technicians = (function () {
     const lorryId = document.getElementById('techLorry').value;
 
     if (!name || !phone) { APP.toast('Please fill in name and phone', 'error'); return; }
-    if (editId) { S().updateTechnician(editId, { name, phone, specialization, role, lorryId }); APP.toast('Technician updated'); }
-    else { S().addTechnician({ name, phone, specialization, role, lorryId }); APP.toast('Technician added'); }
-    closeModal();
-    renderList();
+    
+    let success = false;
+    if (editId) {
+      const r = await S().updateTechnician(editId, { name, phone, specialization, role, lorryId });
+      if (r) { APP.toast('Technician updated'); success = true; }
+    } else {
+      const r = await S().addTechnician({ name, phone, specialization, role, lorryId });
+      if (r) { APP.toast('Technician added'); success = true; }
+    }
+
+    if (success) {
+      closeModal();
+      renderList();
+    }
   }
 
   function confirmDelete(id) {
@@ -196,8 +206,8 @@ APP.Technicians = (function () {
       message: msg,
       type: linked.jobCount > 0 ? 'danger' : 'warn',
       confirmText: 'Delete',
-      onConfirm: () => {
-        S().deleteTechnician(id);
+      onConfirm: async () => {
+        await S().deleteTechnician(id);
         APP.toast('Technician deleted');
         renderList();
       }

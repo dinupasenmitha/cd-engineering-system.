@@ -49,7 +49,7 @@ APP.countUp = function (el, target, duration) {
   duration = duration || 800;
   const startTime = performance.now();
   const isCurrency = typeof target === 'string' && target.includes('Rs.');
-  let numericTarget = isCurrency ? parseFloat(target.replace(/[^0-9.]/g, '')) : parseFloat(target);
+  let numericTarget = isCurrency ? parseFloat(target.replace(/Rs\.\s*/i, '').replace(/,/g, '')) : parseFloat(target);
   if (isNaN(numericTarget) || numericTarget === 0) { el.textContent = target; return; }
   function tick(now) {
     const progress = Math.min((now - startTime) / duration, 1);

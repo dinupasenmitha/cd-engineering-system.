@@ -7,7 +7,9 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'cd_engineering.db');
+const DB_PATH = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : path.join(__dirname, '..', 'data', 'cd_engineering.db');
 let _db = null;
 
 // ── Ensure data directory exists ──────────────────────────
@@ -242,26 +244,30 @@ function seedData() {
   // Users
   const adminHash = bcrypt.hashSync('CDadmin@2026', 10);
   const staffHash = bcrypt.hashSync('CDstaff@2026', 10);
-  run('INSERT INTO users VALUES (?,?,?,?,?,datetime("now"))', [uuidv4(), 'admin', adminHash, 'Administrator', 'admin']);
-  run('INSERT INTO users VALUES (?,?,?,?,?,datetime("now"))', [uuidv4(), 'staff', staffHash, 'Staff User', 'staff']);
+  run("INSERT INTO users VALUES (?,?,?,?,?,datetime('now'))", [uuidv4(), 'admin', adminHash, 'Administrator', 'admin']);
+  run("INSERT INTO users VALUES (?,?,?,?,?,datetime('now'))", [uuidv4(), 'staff', staffHash, 'Staff User', 'staff']);
 
+  seedBusinessData();
+}
+
+function seedBusinessData() {
   // Lorries
   const lA = uuidv4(), lB = uuidv4();
-  run('INSERT INTO lorries VALUES (?,?,?,?,datetime("now"))', [lA, 'WP-LM-1234', 'Colombo', 'Active']);
-  run('INSERT INTO lorries VALUES (?,?,?,?,datetime("now"))', [lB, 'WP-LK-9876', 'Kandy', 'Active']);
+  run("INSERT INTO lorries VALUES (?,?,?,?,datetime('now'))", [lA, 'WP-LM-1234', 'Colombo', 'Active']);
+  run("INSERT INTO lorries VALUES (?,?,?,?,datetime('now'))", [lB, 'WP-LK-9876', 'Kandy', 'Active']);
 
   // Services
   const sInstall = uuidv4(), sRepair = uuidv4(), sRefill = uuidv4(), sClean = uuidv4();
-  run('INSERT INTO services VALUES (?,?,?,?,?,?,datetime("now"))', [sInstall, 'AC Installation', 'Standard split AC installation', 8000, '3h', 'Installation']);
-  run('INSERT INTO services VALUES (?,?,?,?,?,?,datetime("now"))', [sRepair, 'AC Repair', 'Troubleshooting and repair', 5000, '2h', 'Repair']);
-  run('INSERT INTO services VALUES (?,?,?,?,?,?,datetime("now"))', [sRefill, 'AC Gas Refill', 'R410A / R32 gas refill', 3000, '1h', 'Gas Refill']);
-  run('INSERT INTO services VALUES (?,?,?,?,?,?,datetime("now"))', [sClean, 'Full Service Cleaning', 'Deep cleaning of indoor and outdoor units', 3500, '2h', 'Maintenance']);
+  run("INSERT INTO services VALUES (?,?,?,?,?,?,datetime('now'))", [sInstall, 'AC Installation', 'Standard split AC installation', 8000, '3h', 'Installation']);
+  run("INSERT INTO services VALUES (?,?,?,?,?,?,datetime('now'))", [sRepair, 'AC Repair', 'Troubleshooting and repair', 5000, '2h', 'Repair']);
+  run("INSERT INTO services VALUES (?,?,?,?,?,?,datetime('now'))", [sRefill, 'AC Gas Refill', 'R410A / R32 gas refill', 3000, '1h', 'Gas Refill']);
+  run("INSERT INTO services VALUES (?,?,?,?,?,?,datetime('now'))", [sClean, 'Full Service Cleaning', 'Deep cleaning of indoor and outdoor units', 3500, '2h', 'Maintenance']);
 
   // Parts
   const pCompressor = uuidv4(), pFilter = uuidv4(), pPipe = uuidv4();
-  run('INSERT INTO parts VALUES (?,?,?,?,?,datetime("now"))', [pCompressor, 'Inverter Compressor', 'Compressor', 45000, 10]);
-  run('INSERT INTO parts VALUES (?,?,?,?,?,datetime("now"))', [pFilter, 'Air Filter', 'Filter', 1500, 50]);
-  run('INSERT INTO parts VALUES (?,?,?,?,?,datetime("now"))', [pPipe, 'Copper Piping (1m)', 'Pipe', 2000, 100]);
+  run("INSERT INTO parts VALUES (?,?,?,?,?,datetime('now'))", [pCompressor, 'Inverter Compressor', 'Compressor', 45000, 10]);
+  run("INSERT INTO parts VALUES (?,?,?,?,?,datetime('now'))", [pFilter, 'Air Filter', 'Filter', 1500, 50]);
+  run("INSERT INTO parts VALUES (?,?,?,?,?,datetime('now'))", [pPipe, 'Copper Piping (1m)', 'Pipe', 2000, 100]);
 
   // Technicians
   const tK = uuidv4(), tN = uuidv4(), tR = uuidv4();
@@ -289,7 +295,9 @@ function seedData() {
     [uuidv4(), 'JOB-0008', cP, sInstall, lA, 'Installation', '3-ton cassette AC — shop floor', tK, 'Pending', '2026-05-05', 85000, 15000, 3000, 10, 30, '2026-04-30T08:00:00Z'],
   ];
   jobs.forEach(j => {
-    run('INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime("now"))', j);
+    run(`INSERT INTO jobs (id, job_number, customer_id, service_id, lorry_id, service_type, description, technician_id, status, date,
+         parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`, j);
   });
 
   // Invoices for completed jobs (first 5)
@@ -298,7 +306,7 @@ function seedData() {
     const p = calculatePricing(j[10], j[11], j[12], j[13], j[14]);
     const invNum = 'INV-' + String(i + 1).padStart(4, '0');
     const invDate = new Date(new Date(j[15]).getTime() + 2 * 86400000).toISOString();
-    run('INSERT INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime("now"))',
+    run("INSERT INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
       [uuidv4(), invNum, j[0], j[2], j[10], j[11], j[12], j[13], j[14],
        p.subtotal, p.overheadAmount, p.profitAmount, p.total,
        i < 4 ? 'Paid' : 'Unpaid', i < 4 ? 1 : 0, invDate]);
@@ -375,18 +383,24 @@ function exportAllData() {
   };
 }
 
+function clearBusinessData() {
+  run('DELETE FROM signed_documents');
+  run('DELETE FROM job_history');
+  run('DELETE FROM job_parts');
+  run('DELETE FROM invoices');
+  run('DELETE FROM quotations');
+  run('DELETE FROM jobs');
+  run('DELETE FROM customers');
+  run('DELETE FROM technicians');
+  run('DELETE FROM lorries');
+  run('DELETE FROM services');
+  run('DELETE FROM parts');
+}
+
 function importAllData(data) {
+  if (!data || typeof data !== 'object') throw new Error('Invalid backup data');
   const tx = _db.transaction(() => {
-    run('DELETE FROM job_history');
-    run('DELETE FROM job_parts');
-    run('DELETE FROM invoices');
-    run('DELETE FROM quotations');
-    run('DELETE FROM jobs');
-    run('DELETE FROM customers');
-    run('DELETE FROM technicians');
-    run('DELETE FROM lorries');
-    run('DELETE FROM services');
-    run('DELETE FROM parts');
+    clearBusinessData();
 
     (data.lorries || []).forEach(l => {
       run('INSERT OR REPLACE INTO lorries VALUES (?,?,?,?,?)',
@@ -409,12 +423,17 @@ function importAllData(data) {
         [c.id, c.name, c.phone, c.address || '', c.notes || '', c.created_at || new Date().toISOString(), c.updated_at || new Date().toISOString()]);
     });
     (data.jobs || []).forEach(j => {
-      run('INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [j.id, j.customer_id, j.service_id||'', j.lorry_id||'', j.service_type, j.description || '', j.technician_id || '', j.status, j.date, j.parts_cost||0, j.labor_cost||0, j.transport_cost||0, j.overhead_percent||10, j.profit_percent||30, j.created_at || new Date().toISOString(), j.updated_at || new Date().toISOString()]);
+      run(`INSERT OR REPLACE INTO jobs
+        (id, job_number, customer_id, service_id, lorry_id, service_type, description, technician_id, status, date,
+         parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [j.id, j.job_number || j.jobNumber || nextJobNumber(), j.customer_id || j.customerId, j.service_id||'', j.lorry_id||'', j.service_type || j.serviceType,
+         j.description || '', j.technician_id || '', j.status || 'Pending', j.date, j.parts_cost||0, j.labor_cost||0, j.transport_cost||0,
+         j.overhead_percent||10, j.profit_percent||30, j.created_at || new Date().toISOString(), j.updated_at || new Date().toISOString()]);
     });
     (data.invoices || []).forEach(inv => {
       run('INSERT OR REPLACE INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [inv.id, inv.invoice_number, inv.job_id||'', inv.customer_id, inv.parts_cost||0, inv.labor_cost||0, inv.transport_cost||0, inv.overhead_percent||10, inv.profit_percent||30, inv.subtotal||0, inv.overhead_amount||0, inv.profit_amount||0, inv.total||0, inv.status||'Unpaid', inv.finalized||0, inv.created_at || new Date().toISOString(), inv.updated_at || new Date().toISOString()]);
+        [inv.id, inv.invoice_number || inv.invoiceNumber, inv.job_id || inv.jobId || null, inv.customer_id || inv.customerId, inv.parts_cost||0, inv.labor_cost||0, inv.transport_cost||0, inv.overhead_percent||10, inv.profit_percent||30, inv.subtotal||0, inv.overhead_amount||0, inv.profit_amount||0, inv.total||0, inv.status||'Unpaid', inv.finalized||0, inv.created_at || new Date().toISOString(), inv.updated_at || new Date().toISOString()]);
     });
     (data.quotations || []).forEach(q => {
       run('INSERT OR REPLACE INTO quotations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -428,6 +447,20 @@ function importAllData(data) {
       run('INSERT OR REPLACE INTO job_history VALUES (?,?,?,?,?,?)',
         [jh.id, jh.job_id, jh.status, jh.notes||'', jh.updated_by||'', jh.created_at || new Date().toISOString()]);
     });
+    (data.signed_documents || []).forEach(doc => {
+      run('INSERT OR REPLACE INTO signed_documents VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [doc.id, doc.job_id || doc.jobId, doc.customer_id || doc.customerId, doc.document_type || 'job_sheet', doc.filename,
+         doc.original_name || doc.originalName || doc.filename, doc.mime_type || 'application/octet-stream',
+         doc.file_size || 0, doc.uploaded_by || '', doc.notes || '', doc.created_at || new Date().toISOString()]);
+    });
+  });
+  tx();
+}
+
+function resetDemoData() {
+  const tx = _db.transaction(() => {
+    clearBusinessData();
+    seedBusinessData();
   });
   tx();
 }
@@ -435,5 +468,5 @@ function importAllData(data) {
 module.exports = {
   init, persist, getDb, all, get, run,
   calculatePricing, nextInvoiceNumber, nextQuotationNumber, nextJobNumber,
-  exportAllData, importAllData,
+  exportAllData, importAllData, resetDemoData,
 };

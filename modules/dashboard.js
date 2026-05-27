@@ -57,7 +57,7 @@ APP.Dashboard = (function () {
         </div>
 
         <!-- Row 1: Primary KPIs -->
-        <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-icon blue">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -209,6 +209,13 @@ APP.Dashboard = (function () {
   }
 
   function initCharts(stats) {
+    if (typeof Chart === 'undefined') {
+      document.querySelectorAll('.chart-container').forEach(el => {
+        el.innerHTML = '<div class="empty-state" style="padding:20px 0"><p>Charts are unavailable. Please check the server vendor files.</p></div>';
+      });
+      return;
+    }
+
     const rev = S().getMonthlyRevenue();
     const ctx1 = document.getElementById('revenueChart');
     if (ctx1) {

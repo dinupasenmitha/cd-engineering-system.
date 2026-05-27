@@ -214,6 +214,10 @@ APP.Documents = (function () {
   function downloadJobSheetPDF(jobId) {
     const el = document.getElementById('jobSheetPrint');
     if (!el) return;
+    if (typeof html2pdf === 'undefined') {
+      APP.toast('PDF export is unavailable. Please check the server vendor files.', 'error');
+      return;
+    }
     const j = S().getJob(jobId);
     const opt = {
       margin: [8, 8],

@@ -256,7 +256,7 @@ APP.Store = (function () {
   function formatCurrency(a) { return 'Rs. ' + Number(a).toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function formatDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
   async function resetData() {
-    try { await api('/api/backup/import', { method: 'POST', body: {} }); await loadAll(); }
+    try { await api('/api/backup/reset-demo', { method: 'POST' }); await loadAll(); }
     catch (e) { APP.toast(e.message, 'error'); }
   }
   function generateId() { return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9); }

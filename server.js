@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
+const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const helmet = require('helmet');
@@ -22,7 +23,7 @@ const SESSION_MAX_AGE = 20 * 60 * 1000; // 20 minutes
 
 // ── Multer Config (File Upload) ───────────────────────────
 const UPLOAD_DIR = path.join(__dirname, 'data', 'uploads');
-if (!require('fs').existsSync(UPLOAD_DIR)) require('fs').mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname)),
@@ -31,10 +32,10 @@ const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|webp|pdf|heic/;
-    const ext = allowed.test(path.extname(file.originalname).toLowerCase());
-    const mime = allowed.test(file.mimetype);
-    cb(null, ext && mime);
+    const extOk = /\.(jpe?g|png|gif|webp|pdf|heic)$/i.test(path.extname(file.originalname));
+    const mimeOk = /^(image\/(jpeg|png|gif|webp|heic)|application\/pdf)$/i.test(file.mimetype);
+    if (!extOk || !mimeOk) return cb(new Error('Only image and PDF uploads are allowed'));
+    cb(null, true);
   }
 });
 
@@ -56,6 +57,8 @@ app.use(session({
 }));
 
 // Serve static frontend files
+app.use('/vendor/chart.js', express.static(path.join(__dirname, 'node_modules', 'chart.js', 'dist')));
+app.use('/vendor/html2pdf.js', express.static(path.join(__dirname, 'node_modules', 'html2pdf.js', 'dist')));
 app.use(express.static(path.join(__dirname, 'public'), {
   index: false, // We handle index route ourselves
   extensions: ['html'],
@@ -75,7 +78,7 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
 
-  const user = db.get('SELECT * FROM users WHERE username = ?', [username]);
+  const user = db.get('SELECT * FROM users WHERE username = ?', [username.trim().toLowerCase()]);
   if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
   if (!bcrypt.compareSync(password, user.password_hash)) {
@@ -99,6 +102,10 @@ app.get('/api/auth/me', (req, res) => {
     return res.json({ user: req.session.user });
   }
   res.status(401).json({ error: 'Not authenticated' });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', version: '3.0.0', time: new Date().toISOString() });
 });
 
 // ── All API routes below require authentication ───────────
@@ -127,7 +134,7 @@ app.put('/api/customers/:id', (req, res) => {
   const { name, phone, address, notes } = req.body;
   const existing = db.get('SELECT * FROM customers WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Customer not found' });
-  db.run('UPDATE customers SET name=?, phone=?, address=?, notes=?, updated_at=datetime("now") WHERE id=?',
+  db.run("UPDATE customers SET name=?, phone=?, address=?, notes=?, updated_at=datetime('now') WHERE id=?",
     [name || existing.name, phone || existing.phone, address ?? existing.address, notes ?? existing.notes, req.params.id]);
   res.json(db.get('SELECT * FROM customers WHERE id = ?', [req.params.id]));
 });
@@ -244,7 +251,7 @@ app.put('/api/technicians/:id', (req, res) => {
   const { name, phone, specialization, role, lorryId } = req.body;
   const existing = db.get('SELECT * FROM technicians WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Technician not found' });
-  db.run('UPDATE technicians SET name=?, phone=?, specialization=?, role=?, lorry_id=?, updated_at=datetime("now") WHERE id=?',
+  db.run("UPDATE technicians SET name=?, phone=?, specialization=?, role=?, lorry_id=?, updated_at=datetime('now') WHERE id=?",
     [name || existing.name, phone || existing.phone, specialization ?? existing.specialization, role || existing.role, lorryId ?? existing.lorry_id, req.params.id]);
   res.json(db.get('SELECT * FROM technicians WHERE id = ?', [req.params.id]));
 });
@@ -283,7 +290,7 @@ app.put('/api/jobs/:id', (req, res) => {
   const newStatus = b.status || existing.status;
   
   db.run(`UPDATE jobs SET customer_id=?, service_id=?, lorry_id=?, service_type=?, description=?, technician_id=?, status=?, date=?,
-    parts_cost=?, labor_cost=?, transport_cost=?, overhead_percent=?, profit_percent=?, updated_at=datetime("now") WHERE id=?`,
+    parts_cost=?, labor_cost=?, transport_cost=?, overhead_percent=?, profit_percent=?, updated_at=datetime('now') WHERE id=?`,
     [b.customerId||existing.customer_id, b.serviceId??existing.service_id, b.lorryId??existing.lorry_id, b.serviceType||existing.service_type, b.description??existing.description,
      b.technicianId??existing.technician_id, newStatus, b.date||existing.date,
      b.partsCost??existing.parts_cost, b.laborCost??existing.labor_cost, b.transportCost??existing.transport_cost,
@@ -379,7 +386,7 @@ app.put('/api/invoices/:id', (req, res) => {
   }
   const status = b.status || existing.status;
   const finalized = status === 'Paid' ? 1 : (b.finalized ?? existing.finalized);
-  db.run('UPDATE invoices SET status=?, finalized=?, updated_at=datetime("now") WHERE id=?',
+  db.run("UPDATE invoices SET status=?, finalized=?, updated_at=datetime('now') WHERE id=?",
     [status, finalized, req.params.id]);
   res.json(mapInvoice(db.get('SELECT * FROM invoices WHERE id = ?', [req.params.id])));
 });
@@ -482,9 +489,19 @@ app.get('/api/backup/export', requireAdmin, (req, res) => {
 
 app.post('/api/backup/import', requireAdmin, (req, res) => {
   try {
+    if (!req.body || !Array.isArray(req.body.customers) || !Array.isArray(req.body.jobs)) {
+      return res.status(400).json({ error: 'Invalid backup format' });
+    }
     db.importAllData(req.body);
     res.json({ success: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/backup/reset-demo', requireAdmin, (req, res) => {
+  try {
+    db.resetDemoData();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── User Management (Admin Only) ──────────────────────────
@@ -497,18 +514,21 @@ app.post('/api/users', requireAdmin, (req, res) => {
   if (!username || !password || !displayName) return res.status(400).json({ error: 'All fields required' });
   if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   if (!['admin', 'staff'].includes(role)) return res.status(400).json({ error: 'Role must be admin or staff' });
-  const existing = db.get('SELECT id FROM users WHERE username = ?', [username]);
+  const normalizedUsername = username.trim().toLowerCase();
+  const existing = db.get('SELECT id FROM users WHERE username = ?', [normalizedUsername]);
   if (existing) return res.status(409).json({ error: 'Username already exists' });
   const id = uuidv4();
   const hash = bcrypt.hashSync(password, 10);
   db.run('INSERT INTO users (id, username, password_hash, display_name, role) VALUES (?,?,?,?,?)',
-    [id, username.trim().toLowerCase(), hash, displayName.trim(), role]);
-  res.json({ id, username: username.trim().toLowerCase(), display_name: displayName.trim(), role });
+    [id, normalizedUsername, hash, displayName.trim(), role]);
+  res.json({ id, username: normalizedUsername, display_name: displayName.trim(), role });
 });
 
 app.put('/api/users/:id/password', requireAdmin, (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  const user = db.get('SELECT id FROM users WHERE id = ?', [req.params.id]);
+  if (!user) return res.status(404).json({ error: 'User not found' });
   const hash = bcrypt.hashSync(password, 10);
   db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.params.id]);
   res.json({ success: true });
@@ -516,6 +536,12 @@ app.put('/api/users/:id/password', requireAdmin, (req, res) => {
 
 app.delete('/api/users/:id', requireAdmin, (req, res) => {
   if (req.params.id === req.session.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
+  const user = db.get('SELECT id, role FROM users WHERE id = ?', [req.params.id]);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (user.role === 'admin') {
+    const admins = db.get('SELECT COUNT(*) as c FROM users WHERE role = ?', ['admin']).c;
+    if (admins <= 1) return res.status(400).json({ error: 'Cannot delete the last admin account' });
+  }
   db.run('DELETE FROM users WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
@@ -524,7 +550,19 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
 app.post('/api/documents/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const { jobId, customerId, documentType, notes } = req.body;
-  if (!jobId || !customerId) return res.status(400).json({ error: 'Job and customer required' });
+  if (!jobId || !customerId) {
+    try { fs.unlinkSync(req.file.path); } catch (e) {}
+    return res.status(400).json({ error: 'Job and customer required' });
+  }
+  const job = db.get('SELECT id, customer_id FROM jobs WHERE id = ?', [jobId]);
+  if (!job) {
+    try { fs.unlinkSync(req.file.path); } catch (e) {}
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  if (job.customer_id !== customerId) {
+    try { fs.unlinkSync(req.file.path); } catch (e) {}
+    return res.status(400).json({ error: 'Document customer does not match job customer' });
+  }
   const id = uuidv4();
   db.run(`INSERT INTO signed_documents (id, job_id, customer_id, document_type, filename, original_name, mime_type, file_size, uploaded_by, notes) VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [id, jobId, customerId, documentType || 'job_sheet', req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.session?.user?.username || '', notes || '']);
@@ -545,23 +583,32 @@ app.get('/api/documents', (req, res) => {
 app.get('/api/documents/:id/file', (req, res) => {
   const doc = db.get('SELECT * FROM signed_documents WHERE id = ?', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  const filePath = path.join(UPLOAD_DIR, doc.filename);
-  if (!require('fs').existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+  const filePath = path.join(UPLOAD_DIR, path.basename(doc.filename));
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+  const safeOriginalName = path.basename(doc.original_name || 'document').replace(/[\r\n"]/g, '_');
   res.setHeader('Content-Type', doc.mime_type);
-  res.setHeader('Content-Disposition', `inline; filename="${doc.original_name}"`);
+  res.setHeader('Content-Disposition', `inline; filename="${safeOriginalName}"`);
   res.sendFile(filePath);
 });
 
 app.delete('/api/documents/:id', requireAdmin, (req, res) => {
   const doc = db.get('SELECT * FROM signed_documents WHERE id = ?', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  const filePath = path.join(UPLOAD_DIR, doc.filename);
-  try { require('fs').unlinkSync(filePath); } catch(e) {}
+  const filePath = path.join(UPLOAD_DIR, path.basename(doc.filename));
+  try { fs.unlinkSync(filePath); } catch(e) {}
   db.run('DELETE FROM signed_documents WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
 
 // ── Serve index.html for all non-API routes ───────────────
+app.use('/api', (err, req, res, next) => {
+  console.error('[API Error]', err.message);
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ error: 'File is too large. Maximum upload size is 10MB.' });
+  }
+  res.status(500).json({ error: err.message || 'Server error' });
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -589,6 +636,12 @@ async function start() {
   backup.scheduleAutoBackup();
   // Create initial backup on first start
   try { backup.createBackup('startup'); } catch (e) {}
+  const adminUser = db.get('SELECT password_hash FROM users WHERE username = ?', ['admin']);
+  const staffUser = db.get('SELECT password_hash FROM users WHERE username = ?', ['staff']);
+  const defaultAccounts = {
+    admin: adminUser ? bcrypt.compareSync('CDadmin@2026', adminUser.password_hash) : false,
+    staff: staffUser ? bcrypt.compareSync('CDstaff@2026', staffUser.password_hash) : false,
+  };
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log('');
@@ -600,9 +653,14 @@ async function start() {
     console.log('  ║   Status:  Ready                            ║');
     console.log('  ╚══════════════════════════════════════════════╝');
     console.log('');
-    console.log('  Default login:');
-    console.log('    Admin — admin / CDadmin@2026');
-    console.log('    Staff — staff / CDstaff@2026');
+    if (defaultAccounts.admin || defaultAccounts.staff) {
+      console.log('  Default credentials still active:');
+      if (defaultAccounts.admin) console.log('    Admin - admin / CDadmin@2026');
+      if (defaultAccounts.staff) console.log('    Staff - staff / CDstaff@2026');
+      console.log('  Change these passwords before office use.');
+    } else {
+      console.log('  Default account passwords have been changed.');
+    }
     console.log('');
   });
 }
