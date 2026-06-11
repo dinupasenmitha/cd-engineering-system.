@@ -6,7 +6,7 @@ window.APP = window.APP || {};
 
 APP.Store = (function () {
   // ── Local Cache ─────────────────────────────────────────
-  let cache = { customers: [], jobs: [], invoices: [], technicians: [], quotations: [], lorries: [], services: [], parts: [], documents: [] };
+  let cache = { customers: [], jobs: [], invoices: [], technicians: [], quotations: [], lorries: [], services: [], parts: [], documents: [], branches: [], bills: [] };
   let _stats = {};
   let _monthlyRevenue = { labels: [], revenue: [], profit: [], cost: [] };
 
@@ -31,7 +31,7 @@ APP.Store = (function () {
   // ── Bootstrap: Load all data ────────────────────────────
   async function loadAll() {
     try {
-      const [customers, jobs, invoices, technicians, quotations, lorries, services, parts, stats, monthly] = await Promise.all([
+      const [customers, jobs, invoices, technicians, quotations, lorries, services, parts, stats, monthly, branches, bills] = await Promise.all([
         api('/api/customers'),
         api('/api/jobs'),
         api('/api/invoices'),
@@ -42,6 +42,8 @@ APP.Store = (function () {
         api('/api/parts'),
         api('/api/stats'),
         api('/api/stats/monthly-revenue'),
+        api('/api/branches'),
+        api('/api/bills'),
       ]);
       cache.customers = customers.map(mapCustomerFromApi);
       cache.jobs = jobs.map(mapJobFromApi);
@@ -51,6 +53,8 @@ APP.Store = (function () {
       cache.lorries = lorries.map(mapLorryFromApi);
       cache.services = services.map(mapServiceFromApi);
       cache.parts = parts.map(mapPartFromApi);
+      cache.branches = branches;
+      cache.bills = bills;
       _stats = stats;
       _monthlyRevenue = monthly;
     } catch (e) {
@@ -293,6 +297,63 @@ APP.Store = (function () {
     catch (e) { return []; }
   }
 
+  // ── Branches ─────────────────────────────────────────────
+  function getBranches() { return [...cache.branches]; }
+  function getBranch(id) { return cache.branches.find(b => b.id === id) || null; }
+  async function addBranch(b) {
+    try { const r = await api('/api/branches', { method: 'POST', body: b }); cache.branches.push(r); await refreshStats(); return r; }
+    catch (e) { APP.toast(e.message, 'error'); return null; }
+  }
+  async function updateBranch(id, b) {
+    try { const r = await api('/api/branches/' + id, { method: 'PUT', body: b }); const idx = cache.branches.findIndex(x => x.id === id); if (idx >= 0) cache.branches[idx] = r; await refreshStats(); return r; }
+    catch (e) { APP.toast(e.message, 'error'); return null; }
+  }
+  async function deleteBranch(id) {
+    try { await api('/api/branches/' + id, { method: 'DELETE' }); cache.branches = cache.branches.filter(x => x.id !== id); await refreshStats(); }
+    catch (e) { APP.toast(e.message, 'error'); }
+  }
+
+  // ── Bills / Expenses ─────────────────────────────────────
+  function getBills() { return [...cache.bills]; }
+  async function addBill(b) {
+    try { const r = await api('/api/bills', { method: 'POST', body: b }); cache.bills.push(r); await refreshStats(); return r; }
+    catch (e) { APP.toast(e.message, 'error'); return null; }
+  }
+  async function updateBill(id, b) {
+    try { const r = await api('/api/bills/' + id, { method: 'PUT', body: b }); const idx = cache.bills.findIndex(x => x.id === id); if (idx >= 0) cache.bills[idx] = r; await refreshStats(); return r; }
+    catch (e) { APP.toast(e.message, 'error'); return null; }
+  }
+  async function deleteBill(id) {
+    try { await api('/api/bills/' + id, { method: 'DELETE' }); cache.bills = cache.bills.filter(x => x.id !== id); await refreshStats(); }
+    catch (e) { APP.toast(e.message, 'error'); }
+  }
+
+  // ── Lorry Daily Logs ─────────────────────────────────────
+  async function getLorryLogs(lorryId) {
+    try { return await api('/api/lorries/' + lorryId + '/logs'); }
+    catch (e) { return []; }
+  }
+  async function addLorryLog(lorryId, log) {
+    try { const r = await api('/api/lorries/' + lorryId + '/logs', { method: 'POST', body: log }); await refreshStats(); return r; }
+    catch (e) { APP.toast(e.message, 'error'); return null; }
+  }
+  async function deleteLorryLog(lorryId, logId) {
+    try { await api('/api/lorries/' + lorryId + '/logs/' + logId, { method: 'DELETE' }); await refreshStats(); }
+    catch (e) { APP.toast(e.message, 'error'); }
+  }
+
+  // ── Invoice Items ────────────────────────────────────────
+  async function getInvoiceItems(invoiceId) {
+    try { return await api('/api/invoices/' + invoiceId + '/items'); }
+    catch (e) { return []; }
+  }
+
+  // ── Bank Email processing ────────────────────────────────
+  async function processBankEmail(emailText) {
+    try { return await api('/api/invoices/process-email', { method: 'POST', body: { emailText } }); }
+    catch (e) { APP.toast(e.message, 'error'); return null; }
+  }
+
   // ── Public API (same surface as localStorage version) ───
   return {
     loadAll, refreshStats, calculatePricing, buildInvoiceFromJob, generateId,
@@ -307,6 +368,10 @@ APP.Store = (function () {
     getParts, getPart, addPart, updatePart, deletePart,
     getDocumentsByJob, getDocumentsByCustomer, getAllDocuments, uploadDocument, deleteDocument,
     getJobParts,
+    getBranches, getBranch, addBranch, updateBranch, deleteBranch,
+    getBills, addBill, updateBill, deleteBill,
+    getLorryLogs, addLorryLog, deleteLorryLog,
+    getInvoiceItems, processBankEmail,
     getStats, getMonthlyRevenue, formatCurrency, formatDate, resetData,
     on: () => {}, emit: () => {}, // Kept for backwards compat — no-op
   };
