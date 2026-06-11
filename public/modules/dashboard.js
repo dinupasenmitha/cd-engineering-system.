@@ -13,6 +13,21 @@ APP.Dashboard = (function () {
     const main = document.getElementById('main-content');
     const isAdmin = APP.Auth.isAdmin();
 
+    // Calculate branch service due alerts
+    const branches = S().getBranches();
+    let overdueCount = 0;
+    branches.forEach(b => {
+      const regInterval = b.type === 'SBU' ? 1 : 2;
+      const d = b.last_service_date || b.lastServiceDate;
+      if (!d) {
+        overdueCount++;
+      } else {
+        const next = new Date(d);
+        next.setMonth(next.getMonth() + regInterval);
+        if (new Date() > next) overdueCount++;
+      }
+    });
+
     // Calculate month-over-month revenue trend
     const rev = S().getMonthlyRevenue();
     let trendPct = 0;
@@ -56,8 +71,17 @@ APP.Dashboard = (function () {
           </div>
         </div>
 
+        ${overdueCount > 0 ? `
+          <div class="card clickable" onclick="APP.Router.navigate('branches')" style="background:rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); margin-bottom: 20px; padding: 14px">
+            <div style="color:var(--warning); font-weight:700; font-size:14px; display:flex; align-items:center; gap:8px">
+              <span>⚠️</span>
+              <span><strong>${overdueCount} Branch / SBU maintenance service(s) are overdue!</strong> Click here to schedule services.</span>
+            </div>
+          </div>
+        ` : ''}
+
         <!-- Row 1: Primary KPIs -->
-        <div class="kpi-grid">
+        <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr))">
           <div class="kpi-card">
             <div class="kpi-icon blue">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -68,7 +92,8 @@ APP.Dashboard = (function () {
               <div class="kpi-sub">${stats.completedJobs} completed</div>
             </div>
           </div>
-          ${isAdmin ? `<div class="kpi-card">
+          ${isAdmin ? `
+          <div class="kpi-card">
             <div class="kpi-icon green">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             </div>
@@ -79,15 +104,26 @@ APP.Dashboard = (function () {
             </div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-icon purple">
+            <div class="kpi-icon red" style="background:rgba(239, 68, 68, 0.1); color:var(--danger)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </div>
+            <div class="kpi-info">
+              <h4>Total Expenses</h4>
+              <div class="kpi-value" style="color:var(--danger)" data-count="${S().formatCurrency(stats.totalBillsExpense)}">${S().formatCurrency(stats.totalBillsExpense)}</div>
+              <div class="kpi-sub">Bills & lorry fuel costs</div>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon blue">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
             </div>
             <div class="kpi-info">
-              <h4>Estimated Profit</h4>
-              <div class="kpi-value" data-count="${S().formatCurrency(stats.totalProfit)}">${S().formatCurrency(stats.totalProfit)}</div>
-              <div class="kpi-sub">From ${stats.totalInvoices} invoices</div>
+              <h4>Net Profit (PNL)</h4>
+              <div class="kpi-value" style="color:${stats.netProfit >= 0 ? 'var(--success)' : 'var(--danger)'}" data-count="${S().formatCurrency(stats.netProfit)}">${S().formatCurrency(stats.netProfit)}</div>
+              <div class="kpi-sub">Collected minus expenses</div>
             </div>
-          </div>` : ''}
+          </div>
+          ` : ''}
           <div class="kpi-card">
             <div class="kpi-icon amber">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>

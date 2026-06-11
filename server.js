@@ -277,9 +277,9 @@ app.post('/api/jobs', (req, res) => {
   const id = uuidv4();
   const jobNumber = db.nextJobNumber();
   db.run(`INSERT INTO jobs (id, job_number, customer_id, service_id, lorry_id, service_type, description, technician_id, status, date,
-    parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent, branch_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, jobNumber, b.customerId, b.serviceId || '', b.lorryId || '', b.serviceType || 'Repair', b.description || '', b.technicianId || '', b.status || 'Pending',
-     b.date, b.partsCost||0, b.laborCost||0, b.transportCost||0, b.overheadPercent||10, b.profitPercent||30]);
+     b.date, b.partsCost||0, b.laborCost||0, b.transportCost||0, b.overheadPercent||10, b.profitPercent||30, b.branchId || '']);
   res.json(mapJob(db.get('SELECT * FROM jobs WHERE id = ?', [id])));
 });
 
@@ -288,13 +288,13 @@ app.put('/api/jobs/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Job not found' });
   const b = req.body;
   const newStatus = b.status || existing.status;
-  
+
   db.run(`UPDATE jobs SET customer_id=?, service_id=?, lorry_id=?, service_type=?, description=?, technician_id=?, status=?, date=?,
-    parts_cost=?, labor_cost=?, transport_cost=?, overhead_percent=?, profit_percent=?, updated_at=datetime('now') WHERE id=?`,
+    parts_cost=?, labor_cost=?, transport_cost=?, overhead_percent=?, profit_percent=?, branch_id=?, updated_at=datetime('now') WHERE id=?`,
     [b.customerId||existing.customer_id, b.serviceId??existing.service_id, b.lorryId??existing.lorry_id, b.serviceType||existing.service_type, b.description??existing.description,
      b.technicianId??existing.technician_id, newStatus, b.date||existing.date,
      b.partsCost??existing.parts_cost, b.laborCost??existing.labor_cost, b.transportCost??existing.transport_cost,
-     b.overheadPercent??existing.overhead_percent, b.profitPercent??existing.profit_percent, req.params.id]);
+     b.overheadPercent??existing.overhead_percent, b.profitPercent??existing.profit_percent, b.branchId??existing.branch_id, req.params.id]);
 
   if (newStatus !== existing.status) {
     db.run('INSERT INTO job_history (id, job_id, status, notes, updated_by) VALUES (?,?,?,?,?)',
@@ -320,13 +320,13 @@ app.post('/api/jobs/:id/parts', (req, res) => {
   const part = db.get('SELECT * FROM parts WHERE id = ?', [partId]);
   if (!part) return res.status(404).json({ error: 'Part not found' });
   if (part.stock < qty) return res.status(400).json({ error: 'Not enough stock' });
-  
+
   const id = uuidv4();
   db.run('INSERT INTO job_parts (id, job_id, part_id, quantity, unit_price) VALUES (?,?,?,?,?)', [id, req.params.id, partId, qty, part.unit_price]);
   db.run('UPDATE parts SET stock = stock - ? WHERE id = ?', [qty, partId]);
-  
+
   db.run('UPDATE jobs SET parts_cost = parts_cost + ? WHERE id = ?', [qty * part.unit_price, req.params.id]);
-  
+
   res.json({ success: true, part: db.get('SELECT * FROM job_parts WHERE id = ?', [id]) });
 });
 
@@ -356,6 +356,18 @@ app.get('/api/invoices/:id', (req, res) => {
   inv ? res.json(mapInvoice(inv)) : res.status(404).json({ error: 'Invoice not found' });
 });
 
+app.get('/api/invoices/:id/items', (req, res) => {
+  const items = db.all('SELECT * FROM invoice_items WHERE invoice_id = ?', [req.params.id]);
+  res.json(items.map(item => ({
+    id: item.id,
+    invoiceId: item.invoice_id,
+    description: item.description,
+    quantity: item.quantity,
+    unitPrice: item.unit_price,
+    amount: item.amount
+  })));
+});
+
 app.post('/api/invoices', (req, res) => {
   const b = req.body;
   if (!b.jobId || !b.customerId) return res.status(400).json({ error: 'Job and customer required' });
@@ -366,10 +378,35 @@ app.post('/api/invoices', (req, res) => {
   const pricing = db.calculatePricing(b.partsCost, b.laborCost, b.transportCost, b.overheadPercent, b.profitPercent);
   const id = uuidv4();
   const invNum = db.nextInvoiceNumber();
+
+  const job = db.get('SELECT branch_id FROM jobs WHERE id = ?', [b.jobId]);
+  const branchId = b.branchId || (job ? job.branch_id : '');
+
   db.run(`INSERT INTO invoices (id, invoice_number, job_id, customer_id, parts_cost, labor_cost, transport_cost,
-    overhead_percent, profit_percent, subtotal, overhead_amount, profit_amount, total, status, finalized) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    overhead_percent, profit_percent, subtotal, overhead_amount, profit_amount, total, status, finalized, branch_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, invNum, b.jobId, b.customerId, b.partsCost||0, b.laborCost||0, b.transportCost||0,
-     b.overheadPercent||10, b.profitPercent||30, pricing.subtotal, pricing.overheadAmount, pricing.profitAmount, pricing.total, 'Unpaid', 0]);
+     b.overheadPercent||10, b.profitPercent||30, pricing.subtotal, pricing.overheadAmount, pricing.profitAmount, pricing.total, 'Unpaid', 0, branchId || '']);
+
+  // Automatically create invoice items
+  const items = b.items || [];
+  if (items.length === 0) {
+    if (b.laborCost > 0) {
+      items.push({ description: 'Labor Charges', quantity: 1, unitPrice: b.laborCost, amount: b.laborCost });
+    }
+    if (b.transportCost > 0) {
+      items.push({ description: 'Transport / Logistics', quantity: 1, unitPrice: b.transportCost, amount: b.transportCost });
+    }
+    const dbParts = db.all('SELECT jp.*, p.name FROM job_parts jp JOIN parts p ON jp.part_id = p.id WHERE jp.job_id = ?', [b.jobId]);
+    dbParts.forEach(p => {
+      items.push({ description: p.name, quantity: p.quantity, unitPrice: p.unit_price, amount: p.quantity * p.unit_price });
+    });
+  }
+
+  items.forEach(item => {
+    db.run('INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?,?,?,?,?,?)',
+      [uuidv4(), id, item.description, item.quantity || 1, item.unitPrice || 0, item.amount || ((item.quantity||1) * (item.unitPrice||0))]);
+  });
+
   res.json(mapInvoice(db.get('SELECT * FROM invoices WHERE id = ?', [id])));
 });
 
@@ -384,10 +421,45 @@ app.put('/api/invoices/:id', (req, res) => {
   if (b.status === 'Paid' && req.session.user.role !== 'admin') {
     return res.status(403).json({ error: 'Only admin can mark invoices as paid.' });
   }
+
   const status = b.status || existing.status;
   const finalized = status === 'Paid' ? 1 : (b.finalized ?? existing.finalized);
-  db.run("UPDATE invoices SET status=?, finalized=?, updated_at=datetime('now') WHERE id=?",
-    [status, finalized, req.params.id]);
+  const branchId = b.branchId !== undefined ? b.branchId : existing.branch_id;
+  const partsCost = b.partsCost !== undefined ? b.partsCost : existing.parts_cost;
+  const laborCost = b.laborCost !== undefined ? b.laborCost : existing.labor_cost;
+  const transportCost = b.transportCost !== undefined ? b.transportCost : existing.transport_cost;
+  const overheadPercent = b.overheadPercent !== undefined ? b.overheadPercent : existing.overhead_percent;
+  const profitPercent = b.profitPercent !== undefined ? b.profitPercent : existing.profit_percent;
+
+  const pricing = db.calculatePricing(partsCost, laborCost, transportCost, overheadPercent, profitPercent);
+
+  db.run(`UPDATE invoices SET status=?, finalized=?, branch_id=?, parts_cost=?, labor_cost=?, transport_cost=?,
+    overhead_percent=?, profit_percent=?, subtotal=?, overhead_amount=?, profit_amount=?, total=?, updated_at=datetime('now') WHERE id=?`,
+    [status, finalized, branchId, partsCost, laborCost, transportCost,
+     overheadPercent, profitPercent, pricing.subtotal, pricing.overheadAmount, pricing.profitAmount, pricing.total, req.params.id]);
+
+  if (b.items && Array.isArray(b.items)) {
+    db.run('DELETE FROM invoice_items WHERE invoice_id = ?', [req.params.id]);
+    b.items.forEach(item => {
+      db.run('INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?,?,?,?,?,?)',
+        [uuidv4(), req.params.id, item.description, item.quantity || 1, item.unitPrice || 0, item.amount || ((item.quantity||1) * (item.unitPrice||0))]);
+    });
+  }
+
+  if (status === 'Paid' && existing.status !== 'Paid') {
+    const job = db.get('SELECT * FROM jobs WHERE id = ?', [existing.job_id]);
+    const bid = branchId || existing.branch_id;
+    if (job && bid) {
+      const serviceDate = job.date || new Date().toISOString().split('T')[0];
+      const isDpService = job.service_type === 'DP Service' || (job.description && job.description.toLowerCase().includes('dp service'));
+      if (isDpService) {
+        db.run("UPDATE branches SET last_dp_service_date=?, updated_at=datetime('now') WHERE id=?", [serviceDate, bid]);
+      } else {
+        db.run("UPDATE branches SET last_service_date=?, updated_at=datetime('now') WHERE id=?", [serviceDate, bid]);
+      }
+    }
+  }
+
   res.json(mapInvoice(db.get('SELECT * FROM invoices WHERE id = ?', [req.params.id])));
 });
 
@@ -412,11 +484,17 @@ app.post('/api/quotations', (req, res) => {
 app.get('/api/stats', (req, res) => {
   const jobs = db.all('SELECT * FROM jobs');
   const invoices = db.all('SELECT * FROM invoices');
+  const bills = db.all('SELECT * FROM bills');
+
   const totalRevenue = invoices.reduce((s, i) => s + (i.total || 0), 0);
   const paidRevenue = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + (i.total || 0), 0);
   const unpaidRevenue = invoices.filter(i => i.status === 'Unpaid').reduce((s, i) => s + (i.total || 0), 0);
   const totalProfit = invoices.reduce((s, i) => s + (i.profit_amount || 0), 0);
   const totalCost = invoices.reduce((s, i) => s + (i.subtotal || 0), 0);
+
+  const totalBills = bills.reduce((s, b) => s + (b.amount || 0), 0);
+  const paidBills = bills.filter(b => b.status === 'Paid').reduce((s, b) => s + (b.amount || 0), 0);
+  const unpaidBills = bills.filter(b => b.status === 'Unpaid').reduce((s, b) => s + (b.amount || 0), 0);
 
   // Revenue by service type
   const revenueByService = {};
@@ -441,8 +519,174 @@ app.get('/api/stats', (req, res) => {
     totalServices: db.all('SELECT COUNT(*) as c FROM services')[0].c,
     totalParts: db.all('SELECT COUNT(*) as c FROM parts')[0].c,
     totalInvoices: invoices.length,
+    totalBills: bills.length,
+    totalBranches: db.all('SELECT COUNT(*) as c FROM branches')[0].c,
+    totalBillsExpense: totalBills,
+    paidBillsExpense: paidBills,
+    unpaidBillsExpense: unpaidBills,
+    netProfit: paidRevenue - totalBills,
     revenueByService
   });
+});
+
+// ── Bank Email Processing ──────────────────────────────────
+app.post('/api/invoices/process-email', (req, res) => {
+  const { emailText } = req.body;
+  if (!emailText) return res.status(400).json({ error: 'Email text required' });
+
+  const invMatch = emailText.match(/INV-\d{4}/i);
+  const invNumber = invMatch ? invMatch[0].toUpperCase() : null;
+
+  const amountRegexes = [
+    /(?:LKR|Rs\.?)\s*([0-9,]+\.[0-9]{2})/i,
+    /([0-9,]+\.[0-9]{2})\s*(?:LKR|Rs\.?)/i,
+    /amount(?:\s+of)?\s*(?:LKR|Rs\.?)?\s*([0-9,]+\.[0-9]{2})/i,
+    /credited(?:\s+with)?\s*(?:LKR|Rs\.?)?\s*([0-9,]+\.[0-9]{2})/i,
+    /([0-9,]+\.[0-9]{2})/
+  ];
+
+  let parsedAmount = null;
+  for (const regex of amountRegexes) {
+    const match = emailText.match(regex);
+    if (match) {
+      const amtStr = match[1].replace(/,/g, '');
+      const val = parseFloat(amtStr);
+      if (!isNaN(val) && val > 0) {
+        parsedAmount = val;
+        break;
+      }
+    }
+  }
+
+  if (invNumber) {
+    const invoice = db.get('SELECT * FROM invoices WHERE UPPER(invoice_number) = ?', [invNumber]);
+    if (invoice) {
+      const mapped = mapInvoice(invoice);
+      const amountMatches = parsedAmount && Math.abs(mapped.total - parsedAmount) < 1.00;
+      return res.json({
+        success: true,
+        type: amountMatches ? 'perfect' : 'partial',
+        invoice: mapped,
+        parsedAmount,
+        message: amountMatches ? `Perfect match for ${invNumber} with amount Rs. ${parsedAmount}` : `Matched ${invNumber} but email amount (Rs. ${parsedAmount || 'unknown'}) differs from invoice total (Rs. ${mapped.total})`
+      });
+    }
+  }
+
+  if (parsedAmount) {
+    const potentialInvoices = db.all('SELECT * FROM invoices WHERE status = "Unpaid" AND ABS(total - ?) < 5.00', [parsedAmount]);
+    if (potentialInvoices.length > 0) {
+      return res.json({
+        success: true,
+        type: 'amount_only',
+        invoices: potentialInvoices.map(mapInvoice),
+        parsedAmount,
+        message: `No invoice number found, but found ${potentialInvoices.length} unpaid invoices matching the amount Rs. ${parsedAmount}`
+      });
+    }
+  }
+
+  res.json({
+    success: false,
+    message: 'Could not automatically match email to any unpaid invoice. Please process manually.',
+    parsedAmount
+  });
+});
+
+// ── Branches API ───────────────────────────────────────────
+app.get('/api/branches', (req, res) => {
+  res.json(db.all('SELECT * FROM branches ORDER BY name'));
+});
+
+app.post('/api/branches', (req, res) => {
+  const { name, type, address, phone } = req.body;
+  if (!name || !type) return res.status(400).json({ error: 'Name and type required' });
+  if (!['Branch', 'SBU'].includes(type)) return res.status(400).json({ error: 'Type must be Branch or SBU' });
+  const id = uuidv4();
+  db.run('INSERT INTO branches (id, name, type, address, phone) VALUES (?,?,?,?,?)',
+    [id, name.trim(), type, (address||'').trim(), (phone||'').trim()]);
+  res.json(db.get('SELECT * FROM branches WHERE id = ?', [id]));
+});
+
+app.put('/api/branches/:id', (req, res) => {
+  const { name, type, address, phone, lastServiceDate, lastDpServiceDate } = req.body;
+  const existing = db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Branch not found' });
+
+  db.run(`UPDATE branches SET name=?, type=?, address=?, phone=?, last_service_date=?, last_dp_service_date=?, updated_at=datetime('now') WHERE id=?`,
+    [name || existing.name, type || existing.type, address ?? existing.address, phone ?? existing.phone,
+     lastServiceDate ?? existing.last_service_date, lastDpServiceDate ?? existing.last_dp_service_date, req.params.id]);
+  res.json(db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]));
+});
+
+app.delete('/api/branches/:id', (req, res) => {
+  db.run('DELETE FROM branches WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+// ── Bills / Expenses API ───────────────────────────────────
+app.get('/api/bills', (req, res) => {
+  res.json(db.all('SELECT * FROM bills ORDER BY date DESC, created_at DESC'));
+});
+
+app.post('/api/bills', (req, res) => {
+  const { billNumber, vendor, category, amount, date, description, status } = req.body;
+  if (!date || amount === undefined) return res.status(400).json({ error: 'Date and amount required' });
+  const id = uuidv4();
+  const bNum = billNumber || 'BILL-' + Date.now();
+  db.run('INSERT INTO bills (id, bill_number, vendor, category, amount, date, description, status) VALUES (?,?,?,?,?,?,?,?)',
+    [id, bNum, (vendor||'').trim(), category || 'Other', amount || 0, date, (description||'').trim(), status || 'Unpaid']);
+  res.json(db.get('SELECT * FROM bills WHERE id = ?', [id]));
+});
+
+app.put('/api/bills/:id', (req, res) => {
+  const existing = db.get('SELECT * FROM bills WHERE id = ?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Bill not found' });
+  const { billNumber, vendor, category, amount, date, description, status } = req.body;
+  db.run('UPDATE bills SET bill_number=?, vendor=?, category=?, amount=?, date=?, description=?, status=? WHERE id=?',
+    [billNumber || existing.bill_number, vendor ?? existing.vendor, category || existing.category,
+     amount ?? existing.amount, date || existing.date, description ?? existing.description, status || existing.status, req.params.id]);
+  res.json(db.get('SELECT * FROM bills WHERE id = ?', [req.params.id]));
+});
+
+app.delete('/api/bills/:id', (req, res) => {
+  db.run('DELETE FROM bills WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+// ── Lorry Daily Logs API ────────────────────────────────────
+app.get('/api/lorries/:id/logs', (req, res) => {
+  res.json(db.all('SELECT * FROM lorry_logs WHERE lorry_id = ? ORDER BY date DESC, created_at DESC', [req.params.id]));
+});
+
+app.post('/api/lorries/:id/logs', (req, res) => {
+  const { date, startOdometer, endOdometer, fuelLiters, fuelCost, gpsSummary, notes } = req.body;
+  if (!date) return res.status(400).json({ error: 'Date required' });
+
+  const id = uuidv4();
+  db.run('INSERT INTO lorry_logs (id, lorry_id, date, start_odometer, end_odometer, fuel_liters, fuel_cost, gps_summary, notes) VALUES (?,?,?,?,?,?,?,?,?)',
+    [id, req.params.id, date, startOdometer||0, endOdometer||0, fuelLiters||0, fuelCost||0, gpsSummary||'', notes||'']);
+
+  if (fuelCost > 0) {
+    const lorry = db.get('SELECT lorry_number FROM lorries WHERE id = ?', [req.params.id]);
+    const lorryNum = lorry ? lorry.lorry_number : 'Lorry';
+    const billId = uuidv4();
+    const billNum = 'FUEL-' + id.substring(0, 8).toUpperCase();
+    db.run('INSERT INTO bills (id, bill_number, vendor, category, amount, date, description, status) VALUES (?,?,?,?,?,?,?,?)',
+      [billId, billNum, 'Fuel Station', 'Fuel', fuelCost, date, `Auto fuel expense for lorry ${lorryNum}`, 'Paid']);
+  }
+
+  res.json(db.get('SELECT * FROM lorry_logs WHERE id = ?', [id]));
+});
+
+app.delete('/api/lorries/:id/logs/:logId', (req, res) => {
+  const log = db.get('SELECT * FROM lorry_logs WHERE id = ?', [req.params.logId]);
+  if (log) {
+    const billNum = 'FUEL-' + log.id.substring(0, 8).toUpperCase();
+    db.run('DELETE FROM bills WHERE bill_number = ?', [billNum]);
+  }
+  db.run('DELETE FROM lorry_logs WHERE id = ?', [req.params.logId]);
+  res.json({ success: true });
 });
 
 app.get('/api/stats/monthly-revenue', (req, res) => {
@@ -619,7 +863,7 @@ function mapJob(j) {
   return { id: j.id, jobNumber: j.job_number, customerId: j.customer_id, serviceId: j.service_id, lorryId: j.lorry_id, serviceType: j.service_type, description: j.description,
     technicianId: j.technician_id, status: j.status, date: j.date, partsCost: j.parts_cost, laborCost: j.labor_cost,
     transportCost: j.transport_cost, overheadPercent: j.overhead_percent, profitPercent: j.profit_percent,
-    createdAt: j.created_at, updatedAt: j.updated_at };
+    createdAt: j.created_at, updatedAt: j.updated_at, branchId: j.branch_id };
 }
 function mapInvoice(inv) {
   if (!inv) return null;
@@ -627,7 +871,7 @@ function mapInvoice(inv) {
     partsCost: inv.parts_cost, laborCost: inv.labor_cost, transportCost: inv.transport_cost,
     overheadPercent: inv.overhead_percent, profitPercent: inv.profit_percent,
     subtotal: inv.subtotal, overheadAmount: inv.overhead_amount, profitAmount: inv.profit_amount, total: inv.total,
-    status: inv.status, finalized: inv.finalized, createdAt: inv.created_at, updatedAt: inv.updated_at };
+    status: inv.status, finalized: inv.finalized, createdAt: inv.created_at, updatedAt: inv.updated_at, branchId: inv.branch_id };
 }
 
 // ── Start Server ──────────────────────────────────────────

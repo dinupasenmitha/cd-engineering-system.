@@ -216,6 +216,69 @@ function createSchema() {
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
     FOREIGN KEY (customer_id) REFERENCES customers(id)
   )`);
+
+  _db.exec(`CREATE TABLE IF NOT EXISTS branches (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('Branch','SBU')),
+    address TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    last_service_date TEXT DEFAULT '',
+    last_dp_service_date TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  _db.exec(`CREATE TABLE IF NOT EXISTS invoice_items (
+    id TEXT PRIMARY KEY,
+    invoice_id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    quantity REAL DEFAULT 1,
+    unit_price REAL DEFAULT 0,
+    amount REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+  )`);
+
+  _db.exec(`CREATE TABLE IF NOT EXISTS bills (
+    id TEXT PRIMARY KEY,
+    bill_number TEXT UNIQUE NOT NULL,
+    vendor TEXT DEFAULT '',
+    category TEXT DEFAULT 'Other',
+    amount REAL DEFAULT 0,
+    date TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'Unpaid' CHECK(status IN ('Paid','Unpaid')),
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  _db.exec(`CREATE TABLE IF NOT EXISTS lorry_logs (
+    id TEXT PRIMARY KEY,
+    lorry_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    start_odometer REAL DEFAULT 0,
+    end_odometer REAL DEFAULT 0,
+    fuel_liters REAL DEFAULT 0,
+    fuel_cost REAL DEFAULT 0,
+    gps_summary TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (lorry_id) REFERENCES lorries(id) ON DELETE CASCADE
+  )`);
+
+  // Migration: Add branch_id column to jobs if missing
+  try {
+    _db.prepare('SELECT branch_id FROM jobs LIMIT 1').get();
+  } catch (e) {
+    _db.exec('ALTER TABLE jobs ADD COLUMN branch_id TEXT');
+  }
+
+  // Migration: Add branch_id column to invoices if missing
+  try {
+    _db.prepare('SELECT branch_id FROM invoices LIMIT 1').get();
+  } catch (e) {
+    _db.exec('ALTER TABLE invoices ADD COLUMN branch_id TEXT');
+  }
 }
 
 // ── Pricing Formula ───────────────────────────────────────
@@ -306,7 +369,10 @@ function seedBusinessData() {
     const p = calculatePricing(j[10], j[11], j[12], j[13], j[14]);
     const invNum = 'INV-' + String(i + 1).padStart(4, '0');
     const invDate = new Date(new Date(j[15]).getTime() + 2 * 86400000).toISOString();
-    run("INSERT INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+    run(`INSERT INTO invoices
+      (id, invoice_number, job_id, customer_id, parts_cost, labor_cost, transport_cost, overhead_percent,
+       profit_percent, subtotal, overhead_amount, profit_amount, total, status, finalized, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`,
       [uuidv4(), invNum, j[0], j[2], j[10], j[11], j[12], j[13], j[14],
        p.subtotal, p.overheadAmount, p.profitAmount, p.total,
        i < 4 ? 'Paid' : 'Unpaid', i < 4 ? 1 : 0, invDate]);
@@ -373,11 +439,15 @@ function exportAllData() {
     parts: all('SELECT * FROM parts'),
     customers: all('SELECT * FROM customers'),
     technicians: all('SELECT * FROM technicians'),
+    branches: all('SELECT * FROM branches'),
     jobs: all('SELECT * FROM jobs'),
     invoices: all('SELECT * FROM invoices'),
+    invoice_items: all('SELECT * FROM invoice_items'),
     quotations: all('SELECT * FROM quotations'),
     job_parts: all('SELECT * FROM job_parts'),
     job_history: all('SELECT * FROM job_history'),
+    bills: all('SELECT * FROM bills'),
+    lorry_logs: all('SELECT * FROM lorry_logs'),
     signed_documents: all('SELECT * FROM signed_documents'),
     exportedAt: new Date().toISOString(),
   };
@@ -387,14 +457,18 @@ function clearBusinessData() {
   run('DELETE FROM signed_documents');
   run('DELETE FROM job_history');
   run('DELETE FROM job_parts');
+  run('DELETE FROM invoice_items');
   run('DELETE FROM invoices');
   run('DELETE FROM quotations');
   run('DELETE FROM jobs');
   run('DELETE FROM customers');
   run('DELETE FROM technicians');
+  run('DELETE FROM lorry_logs');
   run('DELETE FROM lorries');
   run('DELETE FROM services');
   run('DELETE FROM parts');
+  run('DELETE FROM bills');
+  run('DELETE FROM branches');
 }
 
 function importAllData(data) {
@@ -422,18 +496,41 @@ function importAllData(data) {
       run('INSERT OR REPLACE INTO customers VALUES (?,?,?,?,?,?,?)',
         [c.id, c.name, c.phone, c.address || '', c.notes || '', c.created_at || new Date().toISOString(), c.updated_at || new Date().toISOString()]);
     });
+    (data.branches || []).forEach(b => {
+      run(`INSERT OR REPLACE INTO branches
+        (id, name, type, address, phone, last_service_date, last_dp_service_date, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?)`,
+        [b.id, b.name, b.type || 'Branch', b.address || '', b.phone || '', b.last_service_date || '',
+         b.last_dp_service_date || '', b.created_at || new Date().toISOString(), b.updated_at || new Date().toISOString()]);
+    });
     (data.jobs || []).forEach(j => {
       run(`INSERT OR REPLACE INTO jobs
         (id, job_number, customer_id, service_id, lorry_id, service_type, description, technician_id, status, date,
-         parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         parts_cost, labor_cost, transport_cost, overhead_percent, profit_percent, created_at, updated_at, branch_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [j.id, j.job_number || j.jobNumber || nextJobNumber(), j.customer_id || j.customerId, j.service_id||'', j.lorry_id||'', j.service_type || j.serviceType,
          j.description || '', j.technician_id || '', j.status || 'Pending', j.date, j.parts_cost||0, j.labor_cost||0, j.transport_cost||0,
-         j.overhead_percent||10, j.profit_percent||30, j.created_at || new Date().toISOString(), j.updated_at || new Date().toISOString()]);
+         j.overhead_percent||10, j.profit_percent||30, j.created_at || new Date().toISOString(), j.updated_at || new Date().toISOString(),
+         j.branch_id || j.branchId || '']);
     });
     (data.invoices || []).forEach(inv => {
-      run('INSERT OR REPLACE INTO invoices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [inv.id, inv.invoice_number || inv.invoiceNumber, inv.job_id || inv.jobId || null, inv.customer_id || inv.customerId, inv.parts_cost||0, inv.labor_cost||0, inv.transport_cost||0, inv.overhead_percent||10, inv.profit_percent||30, inv.subtotal||0, inv.overhead_amount||0, inv.profit_amount||0, inv.total||0, inv.status||'Unpaid', inv.finalized||0, inv.created_at || new Date().toISOString(), inv.updated_at || new Date().toISOString()]);
+      run(`INSERT OR REPLACE INTO invoices
+        (id, invoice_number, job_id, customer_id, parts_cost, labor_cost, transport_cost, overhead_percent,
+         profit_percent, subtotal, overhead_amount, profit_amount, total, status, finalized, created_at, updated_at, branch_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [inv.id, inv.invoice_number || inv.invoiceNumber, inv.job_id || inv.jobId || null,
+         inv.customer_id || inv.customerId, inv.parts_cost||0, inv.labor_cost||0, inv.transport_cost||0,
+         inv.overhead_percent||10, inv.profit_percent||30, inv.subtotal||0, inv.overhead_amount||0,
+         inv.profit_amount||0, inv.total||0, inv.status||'Unpaid', inv.finalized||0,
+         inv.created_at || new Date().toISOString(), inv.updated_at || new Date().toISOString(),
+         inv.branch_id || inv.branchId || '']);
+    });
+    (data.invoice_items || []).forEach(item => {
+      run(`INSERT OR REPLACE INTO invoice_items
+        (id, invoice_id, description, quantity, unit_price, amount, created_at)
+        VALUES (?,?,?,?,?,?,?)`,
+        [item.id, item.invoice_id || item.invoiceId, item.description || '', item.quantity || 1,
+         item.unit_price ?? item.unitPrice ?? 0, item.amount || 0, item.created_at || new Date().toISOString()]);
     });
     (data.quotations || []).forEach(q => {
       run('INSERT OR REPLACE INTO quotations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -446,6 +543,22 @@ function importAllData(data) {
     (data.job_history || []).forEach(jh => {
       run('INSERT OR REPLACE INTO job_history VALUES (?,?,?,?,?,?)',
         [jh.id, jh.job_id, jh.status, jh.notes||'', jh.updated_by||'', jh.created_at || new Date().toISOString()]);
+    });
+    (data.bills || []).forEach(b => {
+      run(`INSERT OR REPLACE INTO bills
+        (id, bill_number, vendor, category, amount, date, description, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)`,
+        [b.id, b.bill_number || b.billNumber, b.vendor || '', b.category || 'Other', b.amount || 0,
+         b.date, b.description || '', b.status || 'Unpaid', b.created_at || new Date().toISOString()]);
+    });
+    (data.lorry_logs || []).forEach(log => {
+      run(`INSERT OR REPLACE INTO lorry_logs
+        (id, lorry_id, date, start_odometer, end_odometer, fuel_liters, fuel_cost, gps_summary, notes, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [log.id, log.lorry_id || log.lorryId, log.date, log.start_odometer ?? log.startOdometer ?? 0,
+         log.end_odometer ?? log.endOdometer ?? 0, log.fuel_liters ?? log.fuelLiters ?? 0,
+         log.fuel_cost ?? log.fuelCost ?? 0, log.gps_summary ?? log.gpsSummary ?? '',
+         log.notes || '', log.created_at || new Date().toISOString()]);
     });
     (data.signed_documents || []).forEach(doc => {
       run('INSERT OR REPLACE INTO signed_documents VALUES (?,?,?,?,?,?,?,?,?,?,?)',

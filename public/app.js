@@ -224,6 +224,7 @@ APP.Router = (function () {
     dashboard: APP.Dashboard, customers: APP.Customers, jobs: APP.Jobs,
     pricing: APP.Pricing, invoices: APP.Invoices, technicians: APP.Technicians, settings: APP.Settings,
     fleet: APP.Fleet, catalog: APP.Catalog, documents: APP.Documents,
+    branches: APP.Branches, bills: APP.Bills
   };
 
   function navigate(page, action, id) {

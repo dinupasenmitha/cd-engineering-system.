@@ -264,12 +264,14 @@ APP.Jobs = (function () {
     const technicians = S().getTechnicians().sort((a, b) => a.name.localeCompare(b.name));
     const services = S().getServices().sort((a, b) => a.name.localeCompare(b.name));
     const lorries = S().getLorries().sort((a, b) => a.lorryNumber.localeCompare(b.lorryNumber));
+    const branches = S().getBranches().sort((a, b) => a.name.localeCompare(b.name));
     const selectedCust = j ? j.customerId : (presetCustomerId || '');
 
     const custOptions = customers.map(c => `<option value="${c.id}" ${selectedCust === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
     const techOptions = technicians.map(t => `<option value="${t.id}" ${j && j.technicianId === t.id ? 'selected' : ''}>${t.name}</option>`).join('');
     const srvOptions = services.map(s => `<option value="${s.id}" data-name="${s.name}" data-price="${s.standardPrice}" ${j && j.serviceId === s.id ? 'selected' : ''}>${s.name}</option>`).join('');
     const lorryOptions = lorries.map(l => `<option value="${l.id}" ${j && j.lorryId === l.id ? 'selected' : ''}>${l.lorryNumber} (${l.assignedArea||''})</option>`).join('');
+    const branchOptions = branches.map(b => `<option value="${b.id}" ${j && j.branchId === b.id ? 'selected' : ''}>${b.name} (${b.type})</option>`).join('');
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay active';
@@ -285,9 +287,10 @@ APP.Jobs = (function () {
               ${srvOptions}
             </select></div>
           </div>
-          <div class="form-row">
+          <div class="form-row-3">
             <div class="form-group"><label>Assigned Lorry</label><select class="form-control" id="jobLorry"><option value="">-- None --</option>${lorryOptions}</select></div>
             <div class="form-group"><label>Technician</label><select class="form-control" id="jobTech"><option value="">Select</option>${techOptions}</select></div>
+            <div class="form-group"><label>Branch / SBU</label><select class="form-control" id="jobBranch"><option value="">-- Standalone --</option>${branchOptions}</select></div>
           </div>
           <div class="form-group"><label>Description</label><textarea class="form-control" id="jobDesc" placeholder="Job description...">${j ? j.description : ''}</textarea></div>
           <div class="form-row-3">
@@ -332,12 +335,11 @@ APP.Jobs = (function () {
 
   async function saveJob(editId) {
     const customerId = document.getElementById('jobCustomer').value;
-    
     const serviceSelect = document.getElementById('jobServiceId');
     const serviceId = serviceSelect.value;
     const serviceType = serviceSelect.options[serviceSelect.selectedIndex]?.dataset.name || 'General';
     const lorryId = document.getElementById('jobLorry').value;
-    
+    const branchId = document.getElementById('jobBranch').value;
     const description = document.getElementById('jobDesc').value.trim();
     const technicianId = document.getElementById('jobTech').value;
     const status = document.getElementById('jobStatus').value;
@@ -351,7 +353,7 @@ APP.Jobs = (function () {
     if (!customerId || !date || !serviceId) { APP.toast('Please select a customer, service, and date', 'error'); return; }
     if (partsCost < 0 || laborCost < 0 || transportCost < 0 || overheadPercent < 0 || profitPercent < 0) { APP.toast('Costs and percentages cannot be negative', 'error'); return; }
 
-    const jobData = { customerId, serviceId, lorryId, serviceType, description, technicianId, status, date, partsCost, laborCost, transportCost, overheadPercent, profitPercent };
+    const jobData = { customerId, serviceId, lorryId, branchId, serviceType, description, technicianId, status, date, partsCost, laborCost, transportCost, overheadPercent, profitPercent };
     let success = false;
     if (editId) {
       const r = await S().updateJob(editId, jobData);
@@ -362,6 +364,7 @@ APP.Jobs = (function () {
     }
     if (success) {
       closeModal();
+      await S().loadAll();
       renderList();
     }
   }
