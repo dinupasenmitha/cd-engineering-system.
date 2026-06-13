@@ -411,21 +411,22 @@ function getDb() { return _db; }
 
 // ── Next Invoice/Quotation/Job Number ─────────────────────
 function nextInvoiceNumber() {
-  const row = get("SELECT invoice_number FROM invoices ORDER BY invoice_number DESC LIMIT 1");
+  // Order numerically (CAST) so INV-0010 sorts after INV-0009, not lexicographically
+  const row = get("SELECT invoice_number FROM invoices ORDER BY CAST(SUBSTR(invoice_number, 5) AS INTEGER) DESC LIMIT 1");
   if (!row) return 'INV-0001';
   const num = parseInt(row.invoice_number.replace('INV-', ''), 10);
   return 'INV-' + String(num + 1).padStart(4, '0');
 }
 
 function nextQuotationNumber() {
-  const row = get("SELECT quotation_number FROM quotations ORDER BY quotation_number DESC LIMIT 1");
+  const row = get("SELECT quotation_number FROM quotations ORDER BY CAST(SUBSTR(quotation_number, 5) AS INTEGER) DESC LIMIT 1");
   if (!row) return 'QTN-0001';
   const num = parseInt(row.quotation_number.replace('QTN-', ''), 10);
   return 'QTN-' + String(num + 1).padStart(4, '0');
 }
 
 function nextJobNumber() {
-  const row = get("SELECT job_number FROM jobs WHERE job_number IS NOT NULL ORDER BY job_number DESC LIMIT 1");
+  const row = get("SELECT job_number FROM jobs WHERE job_number IS NOT NULL ORDER BY CAST(SUBSTR(job_number, 5) AS INTEGER) DESC LIMIT 1");
   if (!row || !row.job_number) return 'JOB-0001';
   const num = parseInt(row.job_number.replace('JOB-', ''), 10);
   return 'JOB-' + String(num + 1).padStart(4, '0');

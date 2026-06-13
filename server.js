@@ -17,7 +17,20 @@ const backup = require('./server/backup');
 const multer = require('multer');
 
 const app = express();
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameSrc: ["'none'"],
+    },
+  },
+}));
 const PORT = process.env.PORT || 3000;
 const SESSION_MAX_AGE = 20 * 60 * 1000; // 20 minutes
 
@@ -619,7 +632,7 @@ app.put('/api/branches/:id', (req, res) => {
   res.json(db.get('SELECT * FROM branches WHERE id = ?', [req.params.id]));
 });
 
-app.delete('/api/branches/:id', (req, res) => {
+app.delete('/api/branches/:id', requireAdmin, (req, res) => {
   db.run('DELETE FROM branches WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
@@ -649,7 +662,7 @@ app.put('/api/bills/:id', (req, res) => {
   res.json(db.get('SELECT * FROM bills WHERE id = ?', [req.params.id]));
 });
 
-app.delete('/api/bills/:id', (req, res) => {
+app.delete('/api/bills/:id', requireAdmin, (req, res) => {
   db.run('DELETE FROM bills WHERE id = ?', [req.params.id]);
   res.json({ success: true });
 });
@@ -695,7 +708,8 @@ app.get('/api/stats/monthly-revenue', (req, res) => {
   const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   invoices.forEach(inv => {
     const d = new Date(inv.created_at);
-    const k = d.getFullYear() + '-' + String(d.getMonth()).padStart(2, '0');
+    // getMonth() is 0-indexed; use +1 so the sort key matches calendar order
+    const k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
     const label = mn[d.getMonth()] + ' ' + d.getFullYear();
     if (!months[k]) months[k] = { label, revenue: 0, profit: 0, cost: 0 };
     months[k].revenue += inv.total || 0;
