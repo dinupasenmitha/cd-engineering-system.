@@ -73,6 +73,7 @@ APP.Store = (function () {
     return { id: j.id, jobNumber: j.job_number || j.jobNumber, customerId: j.customer_id, serviceId: j.service_id, lorryId: j.lorry_id, serviceType: j.service_type, description: j.description,
       technicianId: j.technician_id, status: j.status, date: j.date, partsCost: j.parts_cost, laborCost: j.labor_cost,
       transportCost: j.transport_cost, overheadPercent: j.overhead_percent, profitPercent: j.profit_percent,
+      branchId: j.branch_id || j.branchId || '',
       createdAt: j.created_at, updatedAt: j.updated_at };
   }
   function mapTechFromApi(t) {
